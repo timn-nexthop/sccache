@@ -752,6 +752,7 @@ where
     T: CommandCreatorSync,
 {
     use std::io;
+    use rand::Rng;
 
     let rewrite_includes_only = match dist_client {
         Some(ref client) => client.rewrite_includes_only(),
@@ -804,41 +805,57 @@ where
             tc_archive = Some(archive_path);
         }
 
-        debug!("[{}]: Requesting allocation", out_pretty);
-        let jares = dist_client.do_alloc_job(dist_toolchain.clone()).await?;
-        let job_alloc = match jares {
-            dist::AllocJobResult::Success {
-                job_alloc,
-                need_toolchain: true,
-            } => {
-                debug!(
-                    "[{}]: Sending toolchain {} for job {}",
-                    out_pretty, dist_toolchain.archive_id, job_alloc.job_id
-                );
+        let job_alloc = loop {
+            debug!("[{}]: Requesting allocation", out_pretty);
+            let jares = dist_client.do_alloc_job(dist_toolchain.clone()).await?;
+            match jares {
+                dist::AllocJobResult::Success {
+                    job_alloc,
+                    need_toolchain: true,
+                } => {
+                    debug!(
+                        "[{}]: Sending toolchain {} for job {}",
+                        out_pretty, dist_toolchain.archive_id, job_alloc.job_id
+                    );
 
-                match dist_client
-                    .do_submit_toolchain(job_alloc.clone(), dist_toolchain)
-                    .await
-                    .map_err(|e| e.context("Could not submit toolchain"))?
-                {
-                    dist::SubmitToolchainResult::Success => Ok(job_alloc),
-                    dist::SubmitToolchainResult::JobNotFound => {
-                        bail!("Job {} not found on server", job_alloc.job_id)
+                    match dist_client
+                        .do_submit_toolchain(job_alloc.clone(), dist_toolchain.clone())
+                        .await
+                        .map_err(|e| e.context("Could not submit toolchain"))?
+                    {
+                        dist::SubmitToolchainResult::Success => break job_alloc,
+                        dist::SubmitToolchainResult::JobNotFound => {
+                            bail!("Job {} not found on server", job_alloc.job_id)
+                        }
+                        dist::SubmitToolchainResult::CannotCache => bail!(
+                            "Toolchain for job {} could not be cached by server",
+                            job_alloc.job_id
+                        ),
                     }
-                    dist::SubmitToolchainResult::CannotCache => bail!(
-                        "Toolchain for job {} could not be cached by server",
-                        job_alloc.job_id
-                    ),
+                }
+                dist::AllocJobResult::Success {
+                    job_alloc,
+                    need_toolchain: false,
+                } => break job_alloc,
+                dist::AllocJobResult::Fail { msg } => {
+                    // Server is busy - check config to decide whether to retry or fail
+                    if dist_client.retry_on_busy() {
+                        // Retry with random backoff
+                        let sleep_millis = rand::thread_rng().gen_range(1000..=10000);
+                        debug!(
+                            "[{}]: Failed to allocate job: {}. Retrying in {} ms...",
+                            out_pretty, msg, sleep_millis
+                        );
+                        tokio::time::sleep(Duration::from_millis(sleep_millis)).await;
+                        // Continue the loop to retry
+                    } else {
+                        // Fail immediately to trigger local fallback
+                        bail!("Server busy: {}", msg);
+                    }
                 }
             }
-            dist::AllocJobResult::Success {
-                job_alloc,
-                need_toolchain: false,
-            } => Ok(job_alloc),
-            dist::AllocJobResult::Fail { msg } => {
-                Err(anyhow!("Failed to allocate job").context(msg))
-            }
-        }?;
+        };
+
         let job_id = job_alloc.job_id;
         let server_id = job_alloc.server_id;
         debug!("[{}]: Running job", out_pretty);
@@ -3112,6 +3129,9 @@ mod test_dist {
         fn rewrite_includes_only(&self) -> bool {
             false
         }
+        fn retry_on_busy(&self) -> bool {
+            false
+        }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
             None
         }
@@ -3164,6 +3184,9 @@ mod test_dist {
             Ok((self.tc.clone(), None))
         }
         fn rewrite_includes_only(&self) -> bool {
+            false
+        }
+        fn retry_on_busy(&self) -> bool {
             false
         }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
@@ -3235,6 +3258,9 @@ mod test_dist {
             Ok((self.tc.clone(), None))
         }
         fn rewrite_includes_only(&self) -> bool {
+            false
+        }
+        fn retry_on_busy(&self) -> bool {
             false
         }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
@@ -3314,6 +3340,9 @@ mod test_dist {
             ))
         }
         fn rewrite_includes_only(&self) -> bool {
+            false
+        }
+        fn retry_on_busy(&self) -> bool {
             false
         }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
@@ -3413,6 +3442,9 @@ mod test_dist {
             ))
         }
         fn rewrite_includes_only(&self) -> bool {
+            false
+        }
+        fn retry_on_busy(&self) -> bool {
             false
         }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
