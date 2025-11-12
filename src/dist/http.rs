@@ -1103,6 +1103,7 @@ mod client {
         tc_cache: Arc<cache::ClientToolchains>,
         rewrite_includes_only: bool,
         retry_on_busy: bool,
+        remote_only: bool,
     }
 
     impl Client {
@@ -1115,6 +1116,7 @@ mod client {
             auth_token: String,
             rewrite_includes_only: bool,
             retry_on_busy: bool,
+            remote_only: bool,
         ) -> Result<Self> {
             let timeout = Duration::new(REQUEST_TIMEOUT_SECS, 0);
             let connect_timeout = Duration::new(CONNECT_TIMEOUT_SECS, 0);
@@ -1138,6 +1140,7 @@ mod client {
                 tc_cache: Arc::new(client_toolchains),
                 rewrite_includes_only,
                 retry_on_busy,
+                remote_only,
             })
         }
 
@@ -1330,6 +1333,9 @@ mod client {
         }
         fn retry_on_busy(&self) -> bool {
             self.retry_on_busy
+        }
+        fn remote_only(&self) -> bool {
+            self.remote_only
         }
         fn get_custom_toolchain(&self, exe: &Path) -> Option<PathBuf> {
             match self.tc_cache.get_custom_toolchain(exe) {

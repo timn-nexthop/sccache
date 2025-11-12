@@ -14,8 +14,20 @@ toolchains = []
 # the maximum size of the toolchain cache in bytes
 toolchain_cache_size = 5368709120
 cache_dir = "/home/user/.cache/sccache-dist-client"
+
+# When true, only remote builds are performed (no local fallback). Behavior depends on the situation:
+# - If no remote is configured: fails immediately
+# - If remote is inaccessible (DNS failure, connection timeout, etc.): each compile fails immediately,
+#   but sccache retries connecting to the scheduler in the background every 30 seconds
+# - If remote is accessible but busy (no available workers): retries indefinitely with random backoff
+# - If distributed compile fails for other reasons (network errors, etc.): fails immediately
+# When false (default), distributed compilation is attempted but falls back to local compilation on errors.
+remote_only = false
+
+# DEPRECATED: Use remote_only instead.
 # When true, retry job allocation when the server is busy instead of falling back to local compilation.
 # When false (default), fall back to local compilation immediately when the server is busy.
+# This option is kept for backwards compatibility and is interpreted as remote_only when set to true.
 retry_on_busy = false
 
 [dist.auth]

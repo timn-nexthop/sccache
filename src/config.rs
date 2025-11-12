@@ -564,7 +564,14 @@ pub struct DistConfig {
     pub rewrite_includes_only: bool,
     /// When true, retry job allocation when the server is busy instead of falling back to local compilation.
     /// When false (default), fall back to local compilation immediately when the server is busy.
+    /// DEPRECATED: Use `remote_only` instead. This option is kept for backwards compatibility.
     pub retry_on_busy: bool,
+    /// When true, only remote builds are allowed. If a remote is configured and inaccessible,
+    /// the operation will retry for approximately 60 seconds before failing.
+    /// If no remote is configured, the operation fails immediately.
+    /// When the remote is busy, it retries similar to retry_on_busy behavior.
+    /// When false (default), falls back to local compilation on remote failures.
+    pub remote_only: bool,
 }
 
 impl Default for DistConfig {
@@ -577,7 +584,16 @@ impl Default for DistConfig {
             toolchain_cache_size: default_toolchain_cache_size(),
             rewrite_includes_only: false,
             retry_on_busy: false,
+            remote_only: false,
         }
+    }
+}
+
+impl DistConfig {
+    /// Returns the effective remote_only value, taking into account backwards compatibility
+    /// with retry_on_busy. If retry_on_busy is true, it's treated as remote_only.
+    pub fn get_remote_only(&self) -> bool {
+        self.remote_only || self.retry_on_busy
     }
 }
 
@@ -1648,6 +1664,7 @@ no_credentials = true
                 toolchain_cache_size: 5368709120,
                 rewrite_includes_only: false,
                 retry_on_busy: false,
+                remote_only: false,
             },
             server_startup_timeout_ms: Some(10000),
         }
