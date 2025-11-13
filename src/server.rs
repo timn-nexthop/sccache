@@ -158,6 +158,7 @@ pub struct DistClientConfig {
     toolchains: Vec<config::DistToolchainConfig>,
     rewrite_includes_only: bool,
     retry_on_busy: bool,
+    remote_only: bool,
 }
 
 #[cfg(feature = "dist-client")]
@@ -201,6 +202,10 @@ impl DistClientContainer {
     async fn get_client(&self) -> Result<Option<Arc<dyn dist::Client>>> {
         Ok(None)
     }
+
+    async fn get_client_and_config(&self) -> Result<(Option<Arc<dyn dist::Client>>, bool)> {
+        Ok((None, false))
+    }
 }
 
 #[cfg(feature = "dist-client")]
@@ -215,6 +220,7 @@ impl DistClientContainer {
             toolchains: config.dist.toolchains.clone(),
             rewrite_includes_only: config.dist.rewrite_includes_only,
             retry_on_busy: config.dist.retry_on_busy,
+            remote_only: config.dist.get_remote_only(),
         };
         let state = Self::create_state(config);
         let state = pool.block_on(state);
@@ -286,13 +292,25 @@ impl DistClientContainer {
     }
 
     async fn get_client(&self) -> Result<Option<Arc<dyn dist::Client>>> {
+        let (client, _) = self.get_client_and_config().await?;
+        Ok(client)
+    }
+
+    async fn get_client_and_config(&self) -> Result<(Option<Arc<dyn dist::Client>>, bool)> {
         let mut guard = self.state.lock().await;
         let state = &mut *guard;
         Self::maybe_recreate_state(state).await;
         let res = match state {
-            DistClientState::Some(_, dc) => Ok(Some(dc.clone())),
-            DistClientState::Disabled | DistClientState::RetryCreateAt(_, _) => Ok(None),
-            DistClientState::FailWithMessage(_, msg) => Err(anyhow!(msg.clone())),
+            DistClientState::Some(cfg, dc) => Ok((Some(dc.clone()), cfg.remote_only)),
+            DistClientState::Disabled => Ok((None, false)),
+            DistClientState::RetryCreateAt(cfg, _) => Ok((None, cfg.remote_only)),
+            DistClientState::FailWithMessage(cfg, msg) => {
+                if cfg.remote_only {
+                    Err(anyhow!(msg.clone()))
+                } else {
+                    Ok((None, false))
+                }
+            }
         };
         if res.is_err() {
             let config = match mem::replace(state, DistClientState::Disabled) {
@@ -381,6 +399,7 @@ impl DistClientContainer {
                     auth_token,
                     config.rewrite_includes_only,
                     config.retry_on_busy,
+                    config.remote_only,
                 );
                 let dist_client =
                     try_or_retry_later!(dist_client.context("failure during dist client creation"));
@@ -980,6 +999,7 @@ where
                     toolchains: vec![],
                     rewrite_includes_only: false,
                     retry_on_busy: false,
+                    remote_only: false,
                 }),
                 dist_client,
             ))),
@@ -1337,37 +1357,44 @@ where
 
         self.rt
             .spawn(async move {
-                let result = match me.dist_client.get_client().await {
-                    Ok(client) => std::panic::AssertUnwindSafe(hasher.get_cached_or_compile(
-                        &me,
-                        client,
-                        me.creator.clone(),
-                        me.storage.clone(),
-                        arguments,
-                        cwd,
-                        env_vars,
-                        cache_control,
-                        me.rt.clone(),
-                    ))
-                    .catch_unwind()
-                    .await
-                    .map_err(|e| {
-                        let panic = e
-                            .downcast_ref::<&str>()
-                            .map(|s| &**s)
-                            .or_else(|| e.downcast_ref::<String>().map(|s| &**s))
-                            .unwrap_or("An unknown panic was caught.");
-                        let thread = std::thread::current();
-                        let thread_name = thread.name().unwrap_or("unnamed");
-                        if let Some((file, line, column)) = PANIC_LOCATION.with(|l| l.take()) {
-                            anyhow!(
-                                "thread '{thread_name}' panicked at {file}:{line}:{column}: {panic}"
-                            )
+                let result = match me.dist_client.get_client_and_config().await {
+                    Ok((client, remote_only)) => {
+                        // If remote_only is set but no client is available, fail immediately
+                        if remote_only && client.is_none() {
+                            Err(anyhow!("remote_only is enabled but distributed compilation is not available"))
                         } else {
-                            anyhow!("thread '{thread_name}' panicked: {panic}")
+                            std::panic::AssertUnwindSafe(hasher.get_cached_or_compile(
+                                &me,
+                                client,
+                                me.creator.clone(),
+                                me.storage.clone(),
+                                arguments,
+                                cwd,
+                                env_vars,
+                                cache_control,
+                                me.rt.clone(),
+                            ))
+                            .catch_unwind()
+                            .await
+                            .map_err(|e| {
+                                let panic = e
+                                    .downcast_ref::<&str>()
+                                    .map(|s| &**s)
+                                    .or_else(|| e.downcast_ref::<String>().map(|s| &**s))
+                                    .unwrap_or("An unknown panic was caught.");
+                                let thread = std::thread::current();
+                                let thread_name = thread.name().unwrap_or("unnamed");
+                                if let Some((file, line, column)) = PANIC_LOCATION.with(|l| l.take()) {
+                                    anyhow!(
+                                        "thread '{thread_name}' panicked at {file}:{line}:{column}: {panic}"
+                                    )
+                                } else {
+                                    anyhow!("thread '{thread_name}' panicked: {panic}")
+                                }
+                            })
+                            .and_then(std::convert::identity)
                         }
-                    })
-                    .and_then(std::convert::identity),
+                    }
                     Err(e) => Err(e),
                 };
 

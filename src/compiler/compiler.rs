@@ -751,11 +751,15 @@ async fn dist_or_local_compile<T>(
 where
     T: CommandCreatorSync,
 {
-    use std::io;
     use rand::Rng;
+    use std::io;
 
     let rewrite_includes_only = match dist_client {
         Some(ref client) => client.rewrite_includes_only(),
+        _ => false,
+    };
+    let remote_only = match dist_client {
+        Some(ref client) => client.remote_only(),
         _ => false,
     };
     let mut path_transformer = dist::PathTransformer::new();
@@ -839,7 +843,8 @@ where
                 } => break job_alloc,
                 dist::AllocJobResult::Fail { msg } => {
                     // Server is busy - check config to decide whether to retry or fail
-                    if dist_client.retry_on_busy() {
+                    // retry_on_busy or remote_only both enable retry behavior
+                    if dist_client.retry_on_busy() || dist_client.remote_only() {
                         // Retry with random backoff
                         let sleep_millis = rand::thread_rng().gen_range(1000..=10000);
                         debug!(
@@ -943,21 +948,32 @@ where
     };
 
     use futures::TryFutureExt;
+
     do_dist_compile
         .or_else(move |e| async move {
+            // Always fail immediately for these error types
             if let Some(HttpClientError(_)) = e.downcast_ref::<HttpClientError>() {
-                Err(e)
-            } else if let Some(lru_disk_cache::Error::FileTooLarge) =
+                return Err(e);
+            }
+            if let Some(lru_disk_cache::Error::FileTooLarge) =
                 e.downcast_ref::<lru_disk_cache::Error>()
             {
-                Err(anyhow!(
+                return Err(anyhow!(
                     "Could not cache dist toolchain for {:?} locally.
                  Increase `toolchain_cache_size` or decrease the toolchain archive size.",
                     local_executable2
+                ));
+            }
+
+            // For other errors, either fail (remote_only) or fall back to local
+            if remote_only {
+                let errmsg = format!("{e:#}");
+                Err(anyhow!(
+                    "remote_only: Failed to perform distributed compile: {}",
+                    errmsg
                 ))
             } else {
-                // `{:#}` prints the error and the causes in a single line.
-                let errmsg = format!("{:#}", e);
+                let errmsg = format!("{e:#}");
                 warn!(
                     "[{}]: Could not perform distributed compile, falling back to local: {}",
                     out_pretty2, errmsg
@@ -3132,6 +3148,9 @@ mod test_dist {
         fn retry_on_busy(&self) -> bool {
             false
         }
+        fn remote_only(&self) -> bool {
+            false
+        }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
             None
         }
@@ -3187,6 +3206,9 @@ mod test_dist {
             false
         }
         fn retry_on_busy(&self) -> bool {
+            false
+        }
+        fn remote_only(&self) -> bool {
             false
         }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
@@ -3261,6 +3283,9 @@ mod test_dist {
             false
         }
         fn retry_on_busy(&self) -> bool {
+            false
+        }
+        fn remote_only(&self) -> bool {
             false
         }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
@@ -3343,6 +3368,9 @@ mod test_dist {
             false
         }
         fn retry_on_busy(&self) -> bool {
+            false
+        }
+        fn remote_only(&self) -> bool {
             false
         }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
@@ -3445,6 +3473,9 @@ mod test_dist {
             false
         }
         fn retry_on_busy(&self) -> bool {
+            false
+        }
+        fn remote_only(&self) -> bool {
             false
         }
         fn get_custom_toolchain(&self, _exe: &Path) -> Option<PathBuf> {
