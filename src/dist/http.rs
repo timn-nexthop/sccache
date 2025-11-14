@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #[cfg(feature = "dist-client")]
-pub use self::client::Client;
+pub use self::client::{Client, ClientConfig};
 #[cfg(feature = "dist-server")]
 pub use self::server::Server;
 #[cfg(feature = "dist-server")]
@@ -1093,6 +1093,13 @@ mod client {
     const REQUEST_TIMEOUT_SECS: u64 = 1200;
     const CONNECT_TIMEOUT_SECS: u64 = 5;
 
+    /// Configuration options for the distributed client
+    pub struct ClientConfig {
+        pub rewrite_includes_only: bool,
+        pub retry_on_busy: bool,
+        pub remote_only: bool,
+    }
+
     pub struct Client {
         auth_token: String,
         scheduler_url: reqwest::Url,
@@ -1114,9 +1121,7 @@ mod client {
             cache_size: u64,
             toolchain_configs: &[config::DistToolchainConfig],
             auth_token: String,
-            rewrite_includes_only: bool,
-            retry_on_busy: bool,
-            remote_only: bool,
+            config: ClientConfig,
         ) -> Result<Self> {
             let timeout = Duration::new(REQUEST_TIMEOUT_SECS, 0);
             let connect_timeout = Duration::new(CONNECT_TIMEOUT_SECS, 0);
@@ -1138,9 +1143,9 @@ mod client {
                 client: Arc::new(Mutex::new(client)),
                 pool: pool.clone(),
                 tc_cache: Arc::new(client_toolchains),
-                rewrite_includes_only,
-                retry_on_busy,
-                remote_only,
+                rewrite_includes_only: config.rewrite_includes_only,
+                retry_on_busy: config.retry_on_busy,
+                remote_only: config.remote_only,
             })
         }
 
