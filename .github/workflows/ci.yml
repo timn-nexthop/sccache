@@ -206,18 +206,18 @@ jobs:
           grcov . -s . --binary-path $BINARY_DIR --output-type lcov --output-path "${COVERAGE_REPORT_FILE}" --branch $GRCOV_IGNORE_OPTION $GRCOV_EXCLUDE_OPTION
           echo "report=${COVERAGE_REPORT_FILE}" >> $GITHUB_OUTPUT
 
-      - name: Upload coverage results (to Codecov.io)
-        if: ${{ ! matrix.no_coverage }}
-        uses: codecov/codecov-action@v5
-        with:
-          files: ${{ steps.coverage.outputs.report }}
-          ## flags: IntegrationTests, UnitTests, ${{ steps.vars.outputs.CODECOV_FLAGS }}
-          flags: ${{ steps.vars.outputs.CODECOV_FLAGS }}
-          name: codecov-umbrella-${{ matrix.os }}-rust_${{ matrix.rustc || 'stable' }}-${{ matrix.extra_desc }}
-          fail_ci_if_error: true
-          # verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+#      - name: Upload coverage results (to Codecov.io)
+#        if: ${{ ! matrix.no_coverage }}
+#        uses: codecov/codecov-action@v5
+#        with:
+#          files: ${{ steps.coverage.outputs.report }}
+#          ## flags: IntegrationTests, UnitTests, ${{ steps.vars.outputs.CODECOV_FLAGS }}
+#          flags: ${{ steps.vars.outputs.CODECOV_FLAGS }}
+#          name: codecov-umbrella-${{ matrix.os }}-rust_${{ matrix.rustc || 'stable' }}-${{ matrix.extra_desc }}
+#          fail_ci_if_error: true
+#          # verbose: true
+#        env:
+#          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
 
 
