@@ -390,6 +390,11 @@ impl DistClientContainer {
                     auth_token
                         .context("could not load client auth token, run |sccache --dist-auth|")
                 );
+                let client_config = dist::http::ClientConfig {
+                    rewrite_includes_only: config.rewrite_includes_only,
+                    retry_on_busy: config.retry_on_busy,
+                    remote_only: config.remote_only,
+                };
                 let dist_client = dist::http::Client::new(
                     &config.pool,
                     url,
@@ -397,9 +402,7 @@ impl DistClientContainer {
                     config.toolchain_cache_size,
                     &config.toolchains,
                     auth_token,
-                    config.rewrite_includes_only,
-                    config.retry_on_busy,
-                    config.remote_only,
+                    client_config,
                 );
                 let dist_client =
                     try_or_retry_later!(dist_client.context("failure during dist client creation"));
