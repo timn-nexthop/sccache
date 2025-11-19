@@ -39,7 +39,12 @@ pub enum Response {
 #[derive(Serialize, Deserialize, Debug)]
 pub enum CompileResponse {
     /// The compilation was started.
-    CompileStarted,
+    /// The `remote_only` field indicates whether remote-only mode is active.
+    /// When true, the client should not fall back to local compilation on errors.
+    CompileStarted {
+        #[serde(default)]
+        remote_only: bool,
+    },
     /// The server could not handle this compilation request.
     UnhandledCompile,
     /// The compiler was not supported.

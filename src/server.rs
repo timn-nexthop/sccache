@@ -206,6 +206,10 @@ impl DistClientContainer {
     async fn get_client_and_config(&self) -> Result<(Option<Arc<dyn dist::Client>>, bool)> {
         Ok((None, false))
     }
+
+    pub async fn get_remote_only(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(feature = "dist-client")]
@@ -438,6 +442,18 @@ impl DistClientContainer {
         cached_config
             .with(|c| c.dist.auth_tokens.get(auth_url).map(String::to_owned))
             .with_context(|| format!("token for url {} not present in cached config", auth_url))
+    }
+
+    /// Get the remote_only configuration value.
+    /// Returns true if remote_only or retry_on_busy is enabled.
+    pub async fn get_remote_only(&self) -> bool {
+        let guard = self.state.lock().await;
+        match &*guard {
+            DistClientState::Some(cfg, _)
+            | DistClientState::FailWithMessage(cfg, _)
+            | DistClientState::RetryCreateAt(cfg, _) => cfg.remote_only,
+            DistClientState::Disabled => false,
+        }
     }
 }
 
@@ -1278,6 +1294,8 @@ where
                     CompilerArguments::Ok(hasher) => {
                         debug!("parse_arguments: Ok: {:?}", cmd);
 
+                        let remote_only = self.dist_client.get_remote_only().await;
+
                         let body = self
                             .clone()
                             .start_compile_task(c, hasher, cmd, cwd, env_vars)
@@ -1285,7 +1303,7 @@ where
                             .boxed();
 
                         return Message::WithBody(
-                            Response::Compile(CompileResponse::CompileStarted),
+                            Response::Compile(CompileResponse::CompileStarted { remote_only }),
                             body,
                         );
                     }
