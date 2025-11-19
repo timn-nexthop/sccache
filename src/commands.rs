@@ -519,8 +519,8 @@ where
     T: CommandCreatorSync,
 {
     match response {
-        CompileResponse::CompileStarted => {
-            debug!("Server sent CompileStarted");
+        CompileResponse::CompileStarted { remote_only } => {
+            debug!("Server sent CompileStarted (remote_only: {})", remote_only);
             // Wait for CompileFinished.
             match conn.read_one_response() {
                 Ok(Response::CompileFinished(result)) => {
@@ -530,18 +530,36 @@ where
                 Err(e) => {
                     match e.downcast_ref::<io::Error>() {
                         Some(io_e) if io_e.kind() == io::ErrorKind::UnexpectedEof => {
-                            eprintln!(
-                                "sccache: warning: The server looks like it shut down \
-                                 unexpectedly, compiling locally instead"
-                            );
+                            if remote_only {
+                                // When remote_only is enabled, fail instead of falling back
+                                return Err(anyhow!(
+                                    "remote_only: The server shut down unexpectedly during compilation.\n\
+                                     This is likely due to:\n\
+                                       - Server idle timeout (configure SCCACHE_IDLE_TIMEOUT)\n\
+                                       - Server crash or out of memory\n\
+                                       - Manual server shutdown\n\
+                                     Local compilation fallback is disabled due to remote_only configuration."
+                                ));
+                            } else {
+                                eprintln!(
+                                    "sccache: warning: The server looks like it shut down \
+                                     unexpectedly, compiling locally instead"
+                                );
+                            }
                         }
                         _ => {
                             //TODO: something better here?
                             if ignore_all_server_io_errors() {
-                                eprintln!(
-                                    "sccache: warning: error reading compile response from server \
-                                     compiling locally instead"
-                                );
+                                if remote_only {
+                                    return Err(e).context(
+                                        "remote_only: error reading compile response from server",
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "sccache: warning: error reading compile response from server \
+                                         compiling locally instead"
+                                    );
+                                }
                             } else {
                                 return Err(e)
                                     .context("error reading compile response from server");
