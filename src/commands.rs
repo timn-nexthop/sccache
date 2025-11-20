@@ -521,6 +521,18 @@ where
     match response {
         CompileResponse::CompileStarted { remote_only } => {
             debug!("Server sent CompileStarted (remote_only: {})", remote_only);
+
+            // Format the command for display (used in error messages)
+            let cmd_display = format!(
+                "{} {}",
+                exe.display(),
+                cmdline
+                    .iter()
+                    .map(|arg| arg.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+
             // Wait for CompileFinished.
             match conn.read_one_response() {
                 Ok(Response::CompileFinished(result)) => {
@@ -533,16 +545,18 @@ where
                             if remote_only {
                                 // When remote_only is enabled, fail instead of falling back
                                 return Err(anyhow!(
-                                    "remote_only: The server shut down unexpectedly during compilation.\n\
+                                    "remote_only: The local sccache server shut down unexpectedly during compilation.\n\
+                                     Command: {}\n\
                                      This is likely due to:\n\
                                        - Server idle timeout (configure SCCACHE_IDLE_TIMEOUT)\n\
                                        - Server crash or out of memory\n\
                                        - Manual server shutdown\n\
-                                     Local compilation fallback is disabled due to remote_only configuration."
+                                     Local compilation fallback is disabled due to remote_only configuration.",
+                                    cmd_display
                                 ));
                             } else {
                                 eprintln!(
-                                    "sccache: warning: The server looks like it shut down \
+                                    "sccache: warning: The local sccache server looks like it shut down \
                                      unexpectedly, compiling locally instead"
                                 );
                             }
@@ -551,18 +565,20 @@ where
                             //TODO: something better here?
                             if ignore_all_server_io_errors() {
                                 if remote_only {
-                                    return Err(e).context(
-                                        "remote_only: error reading compile response from server",
-                                    );
+                                    return Err(e).context(format!(
+                                        "remote_only: error reading compile response from local sccache server\nCommand: {}",
+                                        cmd_display
+                                    ));
                                 } else {
                                     eprintln!(
-                                        "sccache: warning: error reading compile response from server \
+                                        "sccache: warning: error reading compile response from local sccache server \
                                          compiling locally instead"
                                     );
                                 }
                             } else {
-                                return Err(e)
-                                    .context("error reading compile response from server");
+                                return Err(e).context(
+                                    "error reading compile response from local sccache server",
+                                );
                             }
                         }
                     }
